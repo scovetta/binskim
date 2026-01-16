@@ -1,4 +1,4 @@
-﻿// Copyright (c) Microsoft. All rights reserved.
+// Copyright (c) Microsoft. All rights reserved.
 // Licensed under the MIT license. See LICENSE file in the project root for full license information.
 
 using System.Collections.Generic;
@@ -22,6 +22,15 @@ namespace Microsoft.CodeAnalysis.IL.Rules
         // Clang V7 - V9: "safestack.cc.o"
         // Clang V10 - V14: "safestack.cpp.o"
         private static readonly string[] symbolSafeStack = new string[] { "safestack.cpp.o", "safestack.cc.o" };
+
+        private static readonly string[] ucontextSymbols = new string[]
+        {
+            "getcontext",
+            "setcontext",
+            "swapcontext",
+            "makecontext",
+            "sigaltstack",
+        };
 
         /// <summary>
         /// BA3031
@@ -83,6 +92,15 @@ namespace Microsoft.CodeAnalysis.IL.Rules
                 }
             }
 
+            if (ReferencesUContextSymbols(elf))
+            {
+                context.Logger.Log(this,
+                    RuleUtilities.BuildResult(ResultKind.Pass, context, null,
+                        nameof(RuleResources.NotApplicable_InvalidMetadata),
+                        context.CurrentTarget.Uri.GetFileName()));
+                return;
+            }
+
             // SafeStack was first introduced in Clang 3.7.0
             // https://releases.llvm.org/3.7.0/tools/clang/docs/SafeStack.html
             if (!context.ElfBinary().Compilers.Any(c => c.Compiler == ElfCompilerType.Clang &&
@@ -99,6 +117,35 @@ namespace Microsoft.CodeAnalysis.IL.Rules
                        RuleUtilities.BuildResult(FailureLevel.Error, context, null,
                            nameof(RuleResources.BA3031_Error),
                            context.CurrentTarget.Uri.GetFileName()));
+        }
+
+        private static bool ReferencesUContextSymbols(IELF elf)
+        {
+            foreach (ISection section in elf.Sections)
+            {
+                if (section.Type != SectionType.DynamicSymbolTable && section.Type != SectionType.SymbolTable)
+                {
+                    continue;
+                }
+
+                if (section is SymbolTable<ulong> symbolTable)
+                {
+                    foreach (SymbolEntry<ulong> symbol in symbolTable.Entries)
+                    {
+                        if (!ucontextSymbols.Contains(symbol.Name))
+                        {
+                            continue;
+                        }
+
+                        if (symbol.SectionIndex == 0)
+                        {
+                            return true;
+                        }
+                    }
+                }
+            }
+
+            return false;
         }
     }
 }
